@@ -6,61 +6,51 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 def load_dataset(npz_path, max_sequence_length=None, one_hot=None, test_size=None, sequence_length=None, stride=None):
     data = np.load(npz_path, allow_pickle=True)
-    X = data['X']
+    X1 = data['X1'].tolist()
+    X2 = data['X2'].tolist()
     y = data['y']
 
-    # Convert to list if needed
-    if not isinstance(X, list):
-        X = X.tolist()
-
-    # Filter out sequences that have any empty frames or are empty
-    clean_X, clean_y = [], []
-    for seq, label in zip(X, y):
-        if not seq:  # Empty sequence
+    clean_X1, clean_X2, clean_y = [], [], []
+    for x1_seq, x2_seq, label in zip(X1, X2, y):
+        if not x1_seq or not x2_seq:
             continue
-        if any(len(frame) == 0 for frame in seq):  # Sequence with empty frame
+        if any(len(frame) == 0 for frame in x1_seq) or any(len(frame) == 0 for frame in x2_seq):
             continue
-        clean_X.append(seq)
+        clean_X1.append(x1_seq)
+        clean_X2.append(x2_seq)
         clean_y.append(label)
 
-    if len(clean_X) == 0:
+    if len(clean_X1) == 0:
         raise ValueError("No valid sequences found in the dataset!")
 
-    # Infer feature size (number of features per frame)
-    num_features = len(clean_X[0][0])
+    num_features1 = len(clean_X1[0][0])
+    num_features2 = len(clean_X2[0][0])
 
-    # Ensure all frames have consistent feature count (truncate or pad if needed)
-    for i in range(len(clean_X)):
-        clean_X[i] = [np.pad(frame, (0, num_features - len(frame))) if len(frame) < num_features else frame[:num_features]
-                      for frame in clean_X[i]]
+    for i in range(len(clean_X1)):
+        clean_X1[i] = [np.pad(f, (0, num_features1 - len(f))) if len(f) < num_features1 else f[:num_features1] for f in clean_X1[i]]
+        clean_X2[i] = [np.pad(f, (0, num_features2 - len(f))) if len(f) < num_features2 else f[:num_features2] for f in clean_X2[i]]
 
-    # Stride-based sequence extraction
-    sequences = []
-    labels = []
-    for seq, label in zip(clean_X, clean_y):
-        # Apply stride-based slicing
-        for start in range(0, len(seq) - sequence_length + 1, stride):
-            sequence = seq[start:start + sequence_length]  # Extract a sequence of 'sequence_length'
-            sequences.append(sequence)
+    seqs1, seqs2, labels = [], [], []
+    for s1, s2, label in zip(clean_X1, clean_X2, clean_y):
+        for start in range(0, len(s1) - sequence_length + 1, stride):
+            seqs1.append(s1[start:start + sequence_length])
+            seqs2.append(s2[start:start + sequence_length])
             labels.append(label)
 
-    # Pad sequences to max length if necessary
     if max_sequence_length is None:
-        max_sequence_length = sequence_length  # Default to the sequence_length if no max_sequence_length is provided
+        max_sequence_length = sequence_length
 
-    X_padded = pad_sequences(sequences, maxlen=max_sequence_length, dtype='float32', padding='post', truncating='post')
+    X1_padded = pad_sequences(seqs1, maxlen=max_sequence_length, dtype='float32', padding='post', truncating='post')
+    X2_padded = pad_sequences(seqs2, maxlen=max_sequence_length, dtype='float32', padding='post', truncating='post')
 
-    # Ensure the shape of X_padded is (samples, sequence_length, features)
-    X_padded = np.squeeze(X_padded, axis=-2)  # Remove the second-to-last dimension (1) if it's there
+    X1_padded = np.array(X1_padded).squeeze(axis=2)
+    X2_padded = np.array(X2_padded).squeeze(axis=2)
 
-    # Encode labels
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(labels)
-
     if one_hot:
         y_encoded = to_categorical(y_encoded)
 
-    # Train-test split
-    X_train, X_val, y_train, y_val = train_test_split(X_padded, y_encoded, test_size=test_size, stratify=y_encoded)
-    
-    return X_train, X_val, y_train, y_val, label_encoder, max_sequence_length
+    X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(X1_padded, X2_padded, y_encoded, test_size=test_size, stratify=y_encoded)
+
+    return (X1_train, X2_train), (X1_val, X2_val), y_train, y_val, label_encoder, max_sequence_length

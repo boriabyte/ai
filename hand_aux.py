@@ -5,6 +5,7 @@ from normalize import *
 
 # Angle between fingertips and wrist, used mainly for HAND OPENNESS
 # Joint b is the vertex
+
 def calculate_angle(a, b, c):
     ba = np.array(a) - np.array(b)
     bc = np.array(c) - np.array(b)
@@ -308,61 +309,82 @@ def compute_feature_deltas(current_vector, prev_vector=None, prev_prev_vector=No
     full_vector = np.concatenate([current_vector, delta_1, delta_2])
     return full_vector, delta_1, delta_2
 
-def is_finger_up(tip, pip, wrist):
-    return tip[1] < pip[1] and tip[1] < wrist[1]  # simple heuristic, adjust as needed
-
 FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
 TIP_IDS = [4, 8, 12, 16, 20]
+frames_up_counter = {name: 0 for name in FINGER_NAMES}
+activity_score = {name: 0 for name in FINGER_NAMES}
+THRESHOLD = 5  # frames needed to count as sustained activity
 
+def reset_finger_activity_tracking():
+    global frames_up_counter, activity_score
+    frames_up_counter = {name: 0 for name in FINGER_NAMES}
+    activity_score = {name: 0 for name in FINGER_NAMES}
+    
 def detect_active_fingers(fingers, wrist, image=None):
     active_fingers = []
 
     for name, tip_id in zip(FINGER_NAMES, TIP_IDS):
-        tip = np.array(fingers[name][2])  # tip
-        pip = np.array(fingers[name][1])  # pip or ip
+        tip = np.array(fingers[name][2])
+        pip = np.array(fingers[name][1])
 
         if name == "Thumb":
-            # Thumb uses X-axis comparison
-            is_extended = tip[0] < pip[0]  # works for right hand; reverse if needed for left
+            is_extended = tip[0] < pip[0]
         else:
-            # Other fingers use Y-axis comparison
             is_extended = tip[1] < pip[1]
 
         active_fingers.append(1 if is_extended else 0)
+
+        # Activity logic
+        if is_extended:
+            frames_up_counter[name] += 1
+            if frames_up_counter[name] >= THRESHOLD:
+                activity_score[name] += 1
+                frames_up_counter[name] = 0
+        else:
+            frames_up_counter[name] = 0
 
         if image is not None:
             color = (0, 255, 0) if is_extended else (0, 0, 255)
             cv2.circle(image, tuple(map(int, tip)), 6, color, -1)
             cv2.putText(image, name[0], tuple(map(int, tip)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
 
-    if image is not None:
-        used = [FINGER_NAMES[i] for i, val in enumerate(active_fingers) if val == 1]
-        text = f"Fingers used: {', '.join(used) if used else 'None'}"
-        cv2.putText(image, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
     return active_fingers
 
-def extract_finger_state_features(fingers, wrist, image=None, text_x=10, finger_y_offset=120, tracker=None):
+
+def extract_finger_state_features(fingers, wrist, image=None, text_x=10, finger_y_offset=120):
     states = detect_active_fingers(fingers, wrist, image)
 
-    if tracker:
-        tracker.update(states)
-        activity_scores = tracker.get_activity_scores()
-        normalized_up = sum(activity_scores) / 5.0
-        features = activity_scores + [normalized_up]  # 6 features
+    states_float = [float(s) for s in states]
+    normalized_up = sum(states_float) / 5.0
+    states_float.append(normalized_up)
+
+    # Activity vector before normalization
+    activity_vector = [float(activity_score[name]) for name in FINGER_NAMES]
+
+    # Min-Max normalization of activity_vector
+    min_score = min(activity_vector)
+    max_score = max(activity_vector)
+    
+    # If the max and min are the same, avoid division by zero by setting all values to 0
+    if min_score != max_score:
+        normalized_activity_vector = [(score - min_score) / (max_score - min_score) for score in activity_vector]
     else:
-        states_float = [float(s) for s in states]
-        normalized_up = sum(states_float) / 5.0
-        features = states_float + [normalized_up]  # fallback if no tracker
+        normalized_activity_vector = [0.0] * len(activity_vector)  # All values are equal, so set to 0
+
+    # Extend the states_float with the normalized activity vector
+    states_float.extend(normalized_activity_vector)
 
     if image is not None:
         num_up = int(round(normalized_up * 5))
         finger_labels = ["T", "I", "M", "R", "P"]
         finger_states_str = " ".join([f"{label}:{int(state)}" for label, state in zip(finger_labels, states)])
+        activity_scores_str = " ".join([f"{label}:{score:.2f}" for label, score in zip(finger_labels, normalized_activity_vector)])
 
         cv2.putText(image, f"Fingers up: {num_up}/5", (text_x, finger_y_offset),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 100), 1)
         cv2.putText(image, finger_states_str, (text_x, finger_y_offset + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 220, 100), 1)
+        cv2.putText(image, f"Activity: {activity_scores_str}", (text_x, finger_y_offset + 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 200, 80), 1)
 
-    return features  # [T, I, M, R, P, normalized_sum] using temporal smoothing if available
+    return states_float

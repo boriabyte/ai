@@ -39,6 +39,8 @@ KEY_LABEL_MAP = {
     '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
 }
 
+finger_activity = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
+
 sequence_buffer = []
 current_label = None
 was_recording = False
