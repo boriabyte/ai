@@ -1,5 +1,10 @@
 import mediapipe as mp
 
+"""
+meshes.py defines the necessary drawing and initializations for MediaPipe skeletons
+crucial for data gathering.
+"""
+
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 

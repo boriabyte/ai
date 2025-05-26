@@ -1,14 +1,27 @@
-def load_dataset(npz_path, max_sequence_length=None, one_hot=None, test_size=None, sequence_length=None, stride=None):
-    import numpy as np
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import LabelEncoder
-    from tensorflow.keras.utils import to_categorical
-    from tensorflow.keras.preprocessing.sequence import pad_sequences
+import numpy as np
 
+from tensorflow.keras.utils import to_categorical                                                                                                           # type: ignore
+from tensorflow.keras.preprocessing.sequence import pad_sequences                                                                                           # type: ignore
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+"""
+data_loader.py acts as the catalyst for training by accessing gesture_data.npz through the variable NPZ_PATH and parsing it.
+
+By using pickle for deserializing huge swathes of data, the parsing process is made trivial. The function also cleans the dataset
+of malformed or empty data so as to not affect training when feeding it to the train_model() function in train.py.
+
+Multiple safeguards are in place in order to throw certain errors if the stride or the sequence_length are not provided. Stride acts
+as a "sliding window" when parsing data - i.e. capturing the first 5 segments, then moving onto the next one in the captured set,
+and capturing the next 5. Sequence_length is the length of each sample - in this case, 20.
+"""
+
+def load_dataset(NPZ_PATH, max_sequence_length=None, one_hot=None, test_size=None, sequence_length=None, stride=None):
     if sequence_length is None or stride is None:
         raise ValueError("Both `sequence_length` and `stride` must be provided.")
 
-    data = np.load(npz_path, allow_pickle=True)
+    data = np.load(NPZ_PATH, allow_pickle=True)
     X1 = data['X1'].tolist()
     X2 = data['X2'].tolist()
     y = data['y']
@@ -31,7 +44,7 @@ def load_dataset(npz_path, max_sequence_length=None, one_hot=None, test_size=Non
     num_features1 = len(clean_X1[0][0])
     num_features2 = len(clean_X2[0][0])
 
-    # Optional: padding individual frames if needed (not necessary in your case)
+    # Optional: padding individual frames if needed
     for i in range(len(clean_X1)):
         clean_X1[i] = [np.pad(f, (0, num_features1 - len(f))) if len(f) < num_features1 else f[:num_features1] for f in clean_X1[i]]
         clean_X2[i] = [np.pad(f, (0, num_features2 - len(f))) if len(f) < num_features2 else f[:num_features2] for f in clean_X2[i]]
@@ -49,11 +62,10 @@ def load_dataset(npz_path, max_sequence_length=None, one_hot=None, test_size=Non
     if max_sequence_length is None:
         max_sequence_length = sequence_length
 
-    # Pad sequences
+    # Pad sequences in case of malformation (<20)
     X1_padded = pad_sequences(seqs1, maxlen=max_sequence_length, dtype='float32', padding='post', truncating='post')
     X2_padded = pad_sequences(seqs2, maxlen=max_sequence_length, dtype='float32', padding='post', truncating='post')
 
-    # No squeeze!
     X1_padded = np.array(X1_padded, dtype='float32')
     X2_padded = np.array(X2_padded, dtype='float32')
 

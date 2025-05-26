@@ -1,1 +1,4 @@
 *.npz
+__pycache__/
+saved_model/
+training_plots/

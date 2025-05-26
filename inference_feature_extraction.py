@@ -1,12 +1,21 @@
-import numpy as np
-import time
 from collections import deque
 import mediapipe as mp
+import numpy as np
+import time
+
 from hand_aux import *
 from normalize import *
 from npz_helper import *
 
-# Globals
+
+"""
+inference_feature_extraction.py has the same working principle as process_hands.py. It needs to gather data,
+but instead of storing them for training, it preprocesses them in order to associate with the patterns detected
+during training.
+
+The output parameters are used as the vectors needed for prediction.
+"""
+
 previous_hand_positions = {}
 curvature_arr = []
 prev_vector = None
