@@ -7,6 +7,7 @@ from keras.models import load_model
 from hand_aux import *
 from inference_feature_extraction import extract_features_for_inference
 from model import AttentionLayer
+from meshes import *
 
 # === Constants ===
 SEQ_LENGTH = 20
@@ -25,8 +26,6 @@ def decode_prediction(pred, label_map):
 # === Main Live Inference Function ===
 def run_live_inference():
     cap = cv2.VideoCapture(0)
-    mp_hands = mp.solutions.hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-    mp_draw = mp.solutions.drawing_utils
 
     model = load_model(MODEL_PATH, custom_objects={'AttentionLayer': AttentionLayer})
     label_map = load_label_encoder(LABEL_ENCODER_PATH)
@@ -45,21 +44,22 @@ def run_live_inference():
             break
 
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = mp_hands.process(image)
-
-        main_feat, logic_feat = extract_features_for_inference(image, mp_hands, mp_draw, h, w, results, fps)
+        results = hands.process(image)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        main_feat, logic_feat = extract_features_for_inference(image, mp_hands, mp_drawing, h, w, results, fps)
 
         if main_feat and logic_feat:
             vec_main = np.asarray(main_feat[0], dtype=np.float32)
             vec_logic = np.asarray(logic_feat[0], dtype=np.float32)
 
-            if vec_main.shape[0] == 75 and vec_logic.shape[0] == 11:
+            if vec_main.shape[0] == 93 and vec_logic.shape[0] == 14:
                 feature_buffer.append(vec_main)
                 logic_buffer.append(vec_logic)
 
         if len(feature_buffer) == SEQ_LENGTH:
-            input_main = np.expand_dims(np.array(feature_buffer), axis=0)  # (1, 20, 75)
-            input_logic = np.expand_dims(np.array(logic_buffer), axis=0)  # (1, 20, 11)
+            input_main = np.expand_dims(np.array(feature_buffer), axis=0)  # (1, 20, 93)
+            input_logic = np.expand_dims(np.array(logic_buffer), axis=0)  # (1, 20, 14)
 
             pred = model.predict([input_main, input_logic], verbose=0)
             last_prediction = decode_prediction(pred, label_map)

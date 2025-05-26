@@ -18,6 +18,15 @@ def train_model(train_data, val_data, y_train, y_val, input_shape_1, input_shape
 
     joblib.dump(label_encoder, label_encoder_path)
 
+    # 🔍 Log input info
+    print("\n🔍 Training data info:")
+    print(f"X1 shape (full features): {train_data[0].shape}")   # Expected: (N, seq_len, 93)
+    print(f"X2 shape (logic features): {train_data[1].shape}")  # Expected: (N, seq_len, 14)
+    print(f"y_train shape: {y_train.shape}")
+    print(f"Input shape 1 (for model): {input_shape_1}")
+    print(f"Input shape 2 (for model): {input_shape_2}")
+    print(f"Number of classes: {num_classes}\n")
+
     model = build_dual_input_model(input_shape_1, input_shape_2, num_classes)
     model.compile(optimizer=Adam(learning_rate=lr),
                   loss='sparse_categorical_crossentropy',
@@ -73,4 +82,3 @@ def plot_training_history(history, save_dir=None):
         os.makedirs(save_dir, exist_ok=True)
         plt.savefig(os.path.join(save_dir, 'training_history.png'))
     plt.show()
-

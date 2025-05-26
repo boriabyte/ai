@@ -9,17 +9,140 @@ from normalize import *
 def calculate_angle(a, b, c):
     ba = np.array(a) - np.array(b)
     bc = np.array(c) - np.array(b)
-
     norm_ba = np.linalg.norm(ba)
     norm_bc = np.linalg.norm(bc)
-
     if norm_ba == 0 or norm_bc == 0:
-        return float('nan')  # Invalid angle due to zero vector
-
+        return float('nan')
     cos_angle = np.dot(ba, bc) / (norm_ba * norm_bc)
-    cos_angle = np.clip(cos_angle, -1.0, 1.0)  # Clamp to prevent domain errors
-    angle = np.arccos(cos_angle)
-    return np.degrees(angle)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    return np.degrees(np.arccos(cos_angle))
+
+def euclidean_distance(a, b):
+    return np.linalg.norm(np.array(a) - np.array(b))
+
+def get_palm_center(landmarks):
+    indices = [0, 1, 5, 9, 13, 17]
+    points = [landmarks[i] for i in indices]
+    return np.mean(points, axis=0)
+
+def thumb_inside_fist(landmarks, image=None, text_x=10, y=420):
+    thumb_tip = np.array(landmarks[4])
+    thumb_ip = np.array(landmarks[3])
+    thumb_mcp = np.array(landmarks[2])
+
+    index_tip = np.array(landmarks[8])
+    middle_tip = np.array(landmarks[12])
+    ring_tip = np.array(landmarks[16])
+
+    # Criterion 1: Z-depth (thumb is farther away)
+    min_finger_z = min(index_tip[2], middle_tip[2], ring_tip[2])
+    z_margin = 0.01
+    depth_ok = thumb_tip[2] > min_finger_z + z_margin
+
+    # Criterion 2: Palm proximity
+    palm_center = get_palm_center(landmarks)
+    palm_dist = np.linalg.norm(thumb_tip[:2] - palm_center[:2])
+    palm_ok = palm_dist < 0.09
+
+    # Criterion 3: Thumb curl
+    v1 = thumb_ip[:2] - thumb_mcp[:2]
+    v2 = thumb_tip[:2] - thumb_ip[:2]
+    curl_angle = angle_between(v1, v2)
+    curl_ok = np.degrees(curl_angle) < 65
+
+    # Criterion 4: Fingers visually above thumb
+    thumb_y = thumb_tip[1]
+    fingers_above = sum(1 for i in [8, 12, 16, 20] if landmarks[i][1] < thumb_y)
+    above_ok = fingers_above > 0
+
+    inside = 1.0 if depth_ok and palm_ok and curl_ok and not above_ok else 0.0
+
+    if image is not None:
+        debug = f"Z:{depth_ok} P:{palm_ok} C:{curl_ok} A:{above_ok}"
+        cv2.putText(image, f"Thumb Inside: {inside} ({debug})", (text_x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 255), 1)
+
+    return inside
+
+
+def angle_between(v1, v2):
+    norm_v1 = np.linalg.norm(v1)
+    norm_v2 = np.linalg.norm(v2)
+    if norm_v1 == 0 or norm_v2 == 0:
+        return np.pi
+    unit_v1 = v1 / norm_v1
+    unit_v2 = v2 / norm_v2
+    dot_product = np.dot(unit_v1, unit_v2)
+    return np.arccos(np.clip(dot_product, -1.0, 1.0))
+
+def thumb_between_fingers(landmarks, left_idx, right_idx, image=None, text_x=10, y=440):
+    thumb_x = landmarks[4][0]
+    thumb_y = landmarks[4][1]
+    thumb_z = landmarks[4][2]
+
+    left_x, left_y, left_z = landmarks[left_idx]
+    right_x, right_y, right_z = landmarks[right_idx]
+
+    # X-axis check
+    x_between = min(left_x, right_x) < thumb_x < max(left_x, right_x)
+
+    # Y-axis alignment
+    y_aligned = min(left_y, right_y) - 0.05 < thumb_y < max(left_y, right_y) + 0.05
+
+    # Z-depth: thumb must not be significantly deeper (i.e. behind)
+    avg_finger_z = (left_z + right_z) / 2
+    z_close_enough = thumb_z < avg_finger_z + 0.015  # Threshold prevents thumb from being *behind*
+
+    between = 1.0 if x_between and y_aligned and z_close_enough else 0.0
+
+    if image is not None and between == 1.0:
+        pair_labels = {
+            (5, 9): "Index-Middle",
+            (9, 13): "Middle-Ring",
+            (13, 17): "Ring-Pinky"
+        }
+        label = pair_labels.get((left_idx, right_idx), f"{left_idx}-{right_idx}")
+        cv2.putText(image, f"Thumb Between {label}: {between}", (text_x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 255), 1)
+
+    return between
+
+
+def fingers_above_thumb(landmarks, image=None, text_x=10, y=460):
+    thumb_y = landmarks[4][1]
+    count = sum(1 for i in [8, 12, 16, 20] if landmarks[i][1] < thumb_y)
+    if image is not None:
+        cv2.putText(image, f"Fingers Above Thumb: {count}", (text_x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 255), 1)
+    return float(count)
+
+def average_finger_curl(landmarks, image=None, text_x=10, y=480):
+    finger_joints = {
+        "Thumb": [1, 2, 4],
+        "Index": [5, 6, 8],
+        "Middle": [9, 10, 12],
+        "Ring": [13, 14, 16],
+        "Pinky": [17, 18, 20]
+    }
+    curls = []
+    for i, (name, joints) in enumerate(finger_joints.items()):
+        a, b, c = [landmarks[j] for j in joints]
+        angle = calculate_angle(a, b, c)
+        angle_val = angle if not np.isnan(angle) else 0.0
+        curls.append(angle_val)
+        if image is not None:
+            cv2.putText(image, f"{name} Curl: {angle_val:.2f}", (text_x, y + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 100, 255), 1)
+    return curls
+
+def finger_xy_offsets(landmarks, image=None, text_x=10, y=600):
+    pairs = [(8, 12), (12, 16), (16, 20)]
+    offsets = []
+    for i, (a, b) in enumerate(pairs):
+        dx = landmarks[b][0] - landmarks[a][0]
+        dy = landmarks[b][1] - landmarks[a][1]
+        offsets.extend([dx, dy])
+        if image is not None:
+            cv2.putText(image, f"dx{i}: {dx:.2f}, dy{i}: {dy:.2f}", (text_x, y + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 255, 100), 1)
+    return offsets
 
 # Detection of HAND OPENNESS 
 # Determine if the hand is making a fist based on angles and fingertip distances
@@ -50,26 +173,6 @@ def calculate_vector_angle(v1, v2):
         return float('nan')  # Return NaN if the cosine angle calculation results in NaN
     return np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
 
-# Function to determine hand orientation based on wrist and middle finger MCP
-def get_hand_orientation(yaw, pitch, roll):
-    # Convert angles to radians if they are in degrees
-    yaw = np.radians(yaw)
-    pitch = np.radians(pitch)
-    roll = np.radians(roll)
-    
-    # Create a unit vector that represents the hand's orientation in 3D space
-    x = np.cos(pitch) * np.cos(yaw)
-    y = np.cos(pitch) * np.sin(yaw)
-    z = np.sin(pitch)
-
-    # Reference vector (e.g., pointing straight up in the z-direction)
-    reference_vector = np.array([0, 0, 1])
-
-    # Dot product to get the projection of the hand orientation onto the reference vector
-    orientation = np.dot([x, y, z], reference_vector)
-
-    return orientation  # This gives a scalar between -1 and 1
-
 def det_handedness(hand_results, hand_idx, w):
     handedness = hand_results.multi_handedness[hand_idx].classification[0].label
     handedness = "Left" if handedness == "Left" else "Right"
@@ -78,7 +181,7 @@ def det_handedness(hand_results, hand_idx, w):
     
     return handedness, text_x
 
-def print_handedness(hand_landmarks, image, text_x, text_y_offset_left, text_y_offset_right, fingers, wrist, orientation, draw=True):
+def print_handedness(hand_landmarks, image, text_x, text_y_offset_left, text_y_offset_right, fingers, wrist, draw=True):
     fist_opennness = calculate_openness(hand_landmarks)
 
     # Check for NaN in openness degree
@@ -87,9 +190,6 @@ def print_handedness(hand_landmarks, image, text_x, text_y_offset_left, text_y_o
 
     cv2.putText(image, f"Openness degree: {fist_opennness}", (text_x, text_y_offset_right),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    text_y_offset_right += 30
-    cv2.putText(image, f"Orientation agg. value: {orientation}", (text_x, text_y_offset_right),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 255), 1)
     text_y_offset_right += 30
     
     return fist_opennness
@@ -175,35 +275,6 @@ def compute_velocity_acc(image, frame_time, hand_idx, previous_hand_positions, w
         previous_hand_positions[f"velocity_{hand_idx}"] = velocity
         
         return velocity, acceleration
-
-def calculate_yaw_pitch_roll(landmarks_3d):
-    # Use wrist (0), index MCP (5), pinky MCP (17)
-    wrist = np.array(landmarks_3d[0])
-    index_mcp = np.array(landmarks_3d[5])
-    pinky_mcp = np.array(landmarks_3d[17])
-
-    # Vector from wrist to index and wrist to pinky
-    v1 = index_mcp - wrist
-    v2 = pinky_mcp - wrist
-
-    # Hand normal vector (perpendicular to the palm)
-    normal = np.cross(v1, v2)
-    normal /= np.linalg.norm(normal)
-
-    # Forward vector (palm facing direction)
-    forward = (index_mcp + pinky_mcp)/2 - wrist
-    forward /= np.linalg.norm(forward)
-
-    # Yaw: rotation around Y-axis (based on X-Z plane)
-    yaw = np.arctan2(forward[0], forward[2])
-
-    # Pitch: rotation around X-axis (based on Y-Z plane)
-    pitch = np.arcsin(forward[1])
-
-    # Roll: rotation around Z-axis (based on X-Y plane)
-    roll = np.arctan2(normal[1], normal[0])
-
-    return np.degrees(yaw), np.degrees(pitch), np.degrees(roll)
 
 def euclidean_distance(a, b):
     return np.linalg.norm(np.array(a) - np.array(b))

@@ -1,22 +1,15 @@
 import numpy as np
 
-def z_score_norm(values, new_value):
-    if new_value is None:
-        return 0  # Or another default value (could be the mean of the values if that's desired)
-    
-    # Remove None values from the list before calculating mean and std
-    values = [val for val in values if val is not None]
-    
-    if not values:  # If the list is empty after filtering out None, return the new_value
-        return new_value  # Or return 0, depending on the default behavior you want
-
-    mean = np.mean(values)
-    std = np.std(values)
-    
-    if std == 0:  # Prevent division by zero if the std is 0
-        return 0  # Or return mean, depending on your approach
-
-    return (new_value - mean) / std
+def z_score_norm(buffer, value, min_samples=10):
+    buffer.append(value)
+    if len(buffer) < min_samples:
+        return 0.0  # Not enough data, return 0 to avoid spikes
+    mean = sum(buffer) / len(buffer)
+    variance = sum((x - mean) ** 2 for x in buffer) / len(buffer)
+    std = variance ** 0.5
+    if std == 0:
+        return 0.0
+    return (value - mean) / std
 
 def normalize_angle(angle, min_value, max_value):
     return 2 * (angle - min_value) / (max_value - min_value) - 1

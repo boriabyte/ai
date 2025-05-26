@@ -29,11 +29,6 @@ def round_features(features, decimals=4):
     else:
         return np.round(features, decimals=decimals)
 
-def filter_empty_data(X, y):
-    X_filtered = [x for x in X if x]
-    y_filtered = [y[i] for i in range(len(y)) if X[i]]
-    return X_filtered, y_filtered
-
 def video_feed():
     X1_dataset, X2_dataset, y_dataset = init_npz_file(npz_file_path)
 
@@ -66,21 +61,21 @@ def video_feed():
                 break
 
             image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image = cv2.flip(image, 1)
             hand_results = hands.process(image)
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
             features, finger_logic_features = process_frame_features(image, mp_hands, mp_drawing, h, w, hand_results, fps)
-            if features is not None:
-                main_frames.append(round_features(features))
-                logic_frames.append(round_features(finger_logic_features))
 
-            cv2.imshow('Hand and Face Tracking', image)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            # Only append if features are present and valid
+            if features and finger_logic_features:
+                # Append only the first hand's features
+                main_frames.append(round_features(features[0]))
+                logic_frames.append(round_features(finger_logic_features[0]))
 
         cap.release()
 
+        # Generate sliding window samples
+        added = 0
         for start in range(0, len(main_frames) - sequence_length + 1, stride):
             main_clip = main_frames[start:start + sequence_length]
             logic_clip = logic_frames[start:start + sequence_length]
@@ -89,12 +84,11 @@ def video_feed():
                 X1_dataset.append(main_clip)
                 X2_dataset.append(logic_clip)
                 y_dataset.append(label)
+                added += 1
 
-        print(f"Added {len(main_frames) // stride} samples for label '{label}'")
+        print(f"✅ Added {added} samples for label '{label}'")
 
         save_npz_dataset(X1_dataset, X2_dataset, y_dataset, npz_file_path)
 
-    print("\n✅ All videos processed and saved.")
+    print("\n🎉 All videos processed and saved.")
     cv2.destroyAllWindows()
-
-
